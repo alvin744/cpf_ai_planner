@@ -51,6 +51,7 @@ DEFAULT_INPUTS = {
     "annual_oa_other": 0.0,
 }
 
+
 # -----------------------------------------------------
 # Session state init
 # -----------------------------------------------------
@@ -67,7 +68,7 @@ for field, widget_key in WIDGET_KEY_MAP.items():
 
 
 # -----------------------------------------------------
-# CPF LIFE payout estimate
+# Core calculations
 # -----------------------------------------------------
 
 def estimate_cpf_life_payout(ra_balance: float, plan: str) -> float:
@@ -79,10 +80,6 @@ def estimate_cpf_life_payout(ra_balance: float, plan: str) -> float:
         rate = 0.0063
     return ra_balance * rate
 
-
-# -----------------------------------------------------
-# Cohort retirement sums
-# -----------------------------------------------------
 
 def get_cohort_retirement_sums(current_age: int, inflation_rate: float) -> dict:
     years_to_55 = max(55 - current_age, 0)
@@ -100,10 +97,6 @@ def get_cohort_retirement_sums(current_age: int, inflation_rate: float) -> dict:
     }
 
 
-# -----------------------------------------------------
-# Simplified contribution / allocation assumptions
-# -----------------------------------------------------
-
 def get_allocation(age: int) -> dict:
     if age < 55:
         return {"oa": 0.23, "sa": 0.06, "ra": 0.0, "ma": 0.08}
@@ -114,10 +107,6 @@ def get_allocation(age: int) -> dict:
     else:
         return {"oa": 0.01, "sa": 0.0, "ra": 0.05, "ma": 0.105}
 
-
-# -----------------------------------------------------
-# Simulation
-# -----------------------------------------------------
 
 def simulate_plan(
     current_age: int,
@@ -212,44 +201,59 @@ def simulate_plan(
     }
 
 
+def scenario_summary(
+    label: str,
+    age: int,
+    stop_work_age: int,
+    payout_age: int,
+    salary: float,
+    spending: float,
+    oa_start: float,
+    sa_start: float,
+    ma_start: float,
+    salary_growth: float,
+    inflation: float,
+    plan: str,
+    monthly_oa_housing: float,
+    annual_oa_other: float,
+):
+    result = simulate_plan(
+        current_age=age,
+        stop_work_age=stop_work_age,
+        payout_age=payout_age,
+        salary=salary,
+        salary_growth=salary_growth,
+        oa_start=oa_start,
+        sa_start=sa_start,
+        ma_start=ma_start,
+        monthly_oa_housing=monthly_oa_housing,
+        annual_oa_other=annual_oa_other,
+        inflation_rate=inflation,
+    )
+    ra = result["ra"]
+    payout = estimate_cpf_life_payout(ra, plan)
+    future_spending = spending * ((1 + inflation) ** (payout_age - age))
+    gap = future_spending - payout
+
+    return {
+        "Scenario": label,
+        "RA at payout": ra,
+        "CPF LIFE payout": payout,
+        "Inflated spending": future_spending,
+        "Gap": gap,
+    }
+
+
 # -----------------------------------------------------
 # Sidebar inputs
 # -----------------------------------------------------
 
 st.sidebar.header("Your Inputs")
 
-st.sidebar.number_input(
-    "Current Age",
-    min_value=18,
-    max_value=70,
-    step=1,
-    key="age_input",
-)
-
-st.sidebar.number_input(
-    "Age You Stop Working",
-    min_value=40,
-    max_value=70,
-    step=1,
-    key="stop_work_age_input",
-)
-
-st.sidebar.number_input(
-    "CPF LIFE Payout Start Age",
-    min_value=65,
-    max_value=70,
-    step=1,
-    key="payout_age_input",
-)
-
-st.sidebar.number_input(
-    "Monthly Salary",
-    min_value=0.0,
-    max_value=50000.0,
-    step=100.0,
-    key="salary_input",
-)
-
+st.sidebar.number_input("Current Age", min_value=18, max_value=70, step=1, key="age_input")
+st.sidebar.number_input("Age You Stop Working", min_value=40, max_value=70, step=1, key="stop_work_age_input")
+st.sidebar.number_input("CPF LIFE Payout Start Age", min_value=65, max_value=70, step=1, key="payout_age_input")
+st.sidebar.number_input("Monthly Salary", min_value=0.0, max_value=50000.0, step=100.0, key="salary_input")
 st.sidebar.number_input(
     "Expected Monthly Retirement Spending (today's dollars)",
     min_value=0.0,
@@ -257,60 +261,15 @@ st.sidebar.number_input(
     step=100.0,
     key="spending_input",
 )
-
-st.sidebar.number_input(
-    "Starting OA Balance",
-    min_value=0.0,
-    max_value=2000000.0,
-    step=1000.0,
-    key="oa_start_input",
-)
-
-st.sidebar.number_input(
-    "Starting SA Balance",
-    min_value=0.0,
-    max_value=2000000.0,
-    step=1000.0,
-    key="sa_start_input",
-)
-
-st.sidebar.number_input(
-    "Starting MA Balance",
-    min_value=0.0,
-    max_value=2000000.0,
-    step=1000.0,
-    key="ma_start_input",
-)
-
-st.sidebar.slider(
-    "Annual Salary Growth",
-    min_value=0.0,
-    max_value=0.10,
-    key="salary_growth_input",
-)
-
-st.sidebar.slider(
-    "Annual Inflation Rate",
-    min_value=0.0,
-    max_value=0.10,
-    key="inflation_input",
-)
-
-st.sidebar.slider(
-    "Years in Retirement",
-    min_value=10,
-    max_value=40,
-    key="years_retirement_input",
-)
-
-st.sidebar.selectbox(
-    "CPF LIFE Plan",
-    ["Standard", "Basic", "Escalating"],
-    key="plan_input",
-)
+st.sidebar.number_input("Starting OA Balance", min_value=0.0, max_value=2000000.0, step=1000.0, key="oa_start_input")
+st.sidebar.number_input("Starting SA Balance", min_value=0.0, max_value=2000000.0, step=1000.0, key="sa_start_input")
+st.sidebar.number_input("Starting MA Balance", min_value=0.0, max_value=2000000.0, step=1000.0, key="ma_start_input")
+st.sidebar.slider("Annual Salary Growth", min_value=0.0, max_value=0.10, key="salary_growth_input")
+st.sidebar.slider("Annual Inflation Rate", min_value=0.0, max_value=0.10, key="inflation_input")
+st.sidebar.slider("Years in Retirement", min_value=10, max_value=40, key="years_retirement_input")
+st.sidebar.selectbox("CPF LIFE Plan", ["Standard", "Basic", "Escalating"], key="plan_input")
 
 st.sidebar.markdown("### Optional OA Usage")
-
 st.sidebar.number_input(
     "Monthly OA used for housing",
     min_value=0.0,
@@ -318,7 +277,6 @@ st.sidebar.number_input(
     step=100.0,
     key="monthly_oa_housing_input",
 )
-
 st.sidebar.number_input(
     "Annual OA used for other purposes",
     min_value=0.0,
@@ -337,13 +295,13 @@ if run_clicked:
     st.session_state.planner_has_run = True
     st.rerun()
 
+
 # -----------------------------------------------------
 # Main page
 # -----------------------------------------------------
 
 st.title("CPF AI Retirement Planner")
 st.caption("A simplified CPF projection and strategy simulator for educational planning.")
-
 st.info("On smaller screens, open inputs from the top-left arrow, adjust them, then tap Run Planner.")
 
 if not st.session_state.planner_has_run:
@@ -470,6 +428,62 @@ with st.expander("Early Retirement Simulator", expanded=True):
             "produces the same projected CPF LIFE payout. This does not mean the payout is enough to meet your personal spending target."
         )
 
+with st.expander("Scenario Comparison Engine", expanded=True):
+    scenarios = [
+        scenario_summary(
+            "Current plan",
+            age, stop_work_age, payout_age, salary, spending, oa_start, sa_start, ma_start,
+            salary_growth, inflation, plan, monthly_oa_housing, annual_oa_other
+        ),
+        scenario_summary(
+            "Stop work at 60",
+            age, 60, payout_age, salary, spending, oa_start, sa_start, ma_start,
+            salary_growth, inflation, plan, monthly_oa_housing, annual_oa_other
+        ),
+        scenario_summary(
+            "Start payout at 70",
+            age, stop_work_age, 70, salary, spending, oa_start, sa_start, ma_start,
+            salary_growth, inflation, plan, monthly_oa_housing, annual_oa_other
+        ),
+        scenario_summary(
+            "Reduce spending by 20%",
+            age, stop_work_age, payout_age, salary, spending * 0.8, oa_start, sa_start, ma_start,
+            salary_growth, inflation, plan, monthly_oa_housing, annual_oa_other
+        ),
+    ]
+
+    scenario_df = pd.DataFrame(scenarios)
+
+    display_df = scenario_df.copy()
+    display_df["RA at payout"] = display_df["RA at payout"].map(lambda x: f"${x:,.0f}")
+    display_df["CPF LIFE payout"] = display_df["CPF LIFE payout"].map(lambda x: f"${x:,.0f}/month")
+    display_df["Inflated spending"] = display_df["Inflated spending"].map(lambda x: f"${x:,.0f}/month")
+    display_df["Gap"] = display_df["Gap"].map(lambda x: f"${x:,.0f}")
+
+    st.dataframe(display_df, use_container_width=True, hide_index=True)
+
+    improvements = []
+    current_payout = scenarios[0]["CPF LIFE payout"]
+
+    for row in scenarios[1:]:
+        payout_gain = row["CPF LIFE payout"] - current_payout
+        gap_reduction = scenarios[0]["Gap"] - row["Gap"]
+        improvements.append({
+            "Scenario": row["Scenario"],
+            "Payout gain": payout_gain,
+            "Gap reduction": gap_reduction,
+        })
+
+    best = max(improvements, key=lambda x: x["Gap reduction"])
+
+    if best["Gap reduction"] > 0:
+        st.success(
+            f"Best tested improvement: **{best['Scenario']}**. "
+            f"It improves the monthly gap by about **${best['Gap reduction']:,.0f}** in this simplified model."
+        )
+    else:
+        st.info("None of the preset scenarios materially improved the current gap in this simplified model.")
+
 with st.expander("Housing vs Retirement Impact", expanded=True):
     if monthly_oa_housing == 0:
         st.write("No OA housing deduction is currently applied in this scenario.")
@@ -530,7 +544,6 @@ longevity_df = pd.DataFrame({
 st.line_chart(longevity_df)
 
 st.divider()
-
 st.caption("""
 This planner is for educational planning support only.
 It does not replace the official CPF estimator or financial advice.
