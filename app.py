@@ -33,6 +33,9 @@ WIDGET_KEY_MAP = {
     "monthly_oa_housing": "monthly_oa_housing_input",
     "housing_end_age": "housing_end_age_input",
     "annual_oa_other": "annual_oa_other_input",
+    "sa_cash_topup_per_year": "sa_cash_topup_per_year_input",
+    "oa_to_sa_transfer_per_year": "oa_to_sa_transfer_per_year_input",
+    "pledge_property_brs": "pledge_property_brs_input",
 }
 
 DEFAULT_INPUTS = {
@@ -51,6 +54,9 @@ DEFAULT_INPUTS = {
     "monthly_oa_housing": 0.0,
     "housing_end_age": 55,
     "annual_oa_other": 0.0,
+    "sa_cash_topup_per_year": 0.0,
+    "oa_to_sa_transfer_per_year": 0.0,
+    "pledge_property_brs": False,
 }
 
 # -----------------------------------------------------
@@ -129,6 +135,8 @@ def simulate_plan(
     monthly_oa_housing: float,
     housing_end_age: int,
     annual_oa_other: float,
+    sa_cash_topup_per_year: float,
+    oa_to_sa_transfer_per_year: float,
     inflation_rate: float,
 ):
     sums = get_cohort_retirement_sums(current_age, inflation_rate)
@@ -144,6 +152,15 @@ def simulate_plan(
 
     for age in range(current_age, payout_age):
         working = age < stop_work_age
+
+        # Apply strategy actions only before 55 in this simplified model
+        if age < 55 and sa_cash_topup_per_year > 0:
+            sa += sa_cash_topup_per_year
+
+        if age < 55 and oa_to_sa_transfer_per_year > 0:
+            transfer = min(oa, oa_to_sa_transfer_per_year)
+            oa -= transfer
+            sa += transfer
 
         if working:
             annual_salary = salary * 12
@@ -228,6 +245,8 @@ def scenario_summary(
     monthly_oa_housing: float,
     housing_end_age: int,
     annual_oa_other: float,
+    sa_cash_topup_per_year: float,
+    oa_to_sa_transfer_per_year: float,
 ):
     result = simulate_plan(
         current_age=age,
@@ -241,6 +260,8 @@ def scenario_summary(
         monthly_oa_housing=monthly_oa_housing,
         housing_end_age=housing_end_age,
         annual_oa_other=annual_oa_other,
+        sa_cash_topup_per_year=sa_cash_topup_per_year,
+        oa_to_sa_transfer_per_year=oa_to_sa_transfer_per_year,
         inflation_rate=inflation,
     )
     ra = result["ra"]
@@ -305,13 +326,40 @@ st.sidebar.number_input(
     key="annual_oa_other_input",
 )
 
+st.sidebar.markdown("### Retirement Strategy Options")
+st.sidebar.number_input(
+    "SA Cash Top-Up (per year)",
+    min_value=0.0,
+    max_value=200000.0,
+    step=1000.0,
+    key="sa_cash_topup_per_year_input",
+)
+st.sidebar.caption("In this simplified version, SA cash top-up is applied only before age 55.")
+
+st.sidebar.number_input(
+    "OA → SA Transfer (per year)",
+    min_value=0.0,
+    max_value=200000.0,
+    step=1000.0,
+    key="oa_to_sa_transfer_per_year_input",
+)
+st.sidebar.caption("In this simplified version, OA → SA transfer is applied only before age 55 and is capped by available OA balance.")
+
+st.sidebar.checkbox(
+    "Pledge existing property (use BRS at withdrawal)",
+    key="pledge_property_brs_input",
+)
+st.sidebar.caption(
+    "In this simplified version, property pledge changes the benchmark interpretation from FRS to BRS only. "
+    "It does not directly change the CPF LIFE payout formula."
+)
+
 run_clicked = st.sidebar.button("Run Planner", type="primary")
 
 if run_clicked:
     st.session_state.planner_inputs = {
         field: st.session_state[widget_key]
         for field, widget_key in WIDGET_KEY_MAP.items()
-        if field in DEFAULT_INPUTS
     }
     st.session_state.planner_has_run = True
     st.rerun()
@@ -346,6 +394,9 @@ plan = inputs["plan"]
 monthly_oa_housing = float(inputs["monthly_oa_housing"])
 housing_end_age = int(inputs["housing_end_age"])
 annual_oa_other = float(inputs["annual_oa_other"])
+sa_cash_topup_per_year = float(inputs["sa_cash_topup_per_year"])
+oa_to_sa_transfer_per_year = float(inputs["oa_to_sa_transfer_per_year"])
+pledge_property_brs = bool(inputs["pledge_property_brs"])
 
 base = simulate_plan(
     current_age=age,
@@ -359,6 +410,8 @@ base = simulate_plan(
     monthly_oa_housing=monthly_oa_housing,
     housing_end_age=housing_end_age,
     annual_oa_other=annual_oa_other,
+    sa_cash_topup_per_year=sa_cash_topup_per_year,
+    oa_to_sa_transfer_per_year=oa_to_sa_transfer_per_year,
     inflation_rate=inflation,
 )
 
@@ -368,6 +421,8 @@ inflated_spending = spending * ((1 + inflation) ** (payout_age - age))
 gap = inflated_spending - payout
 sums = base["sums"]
 coverage_ratio = payout / inflated_spending if inflated_spending > 0 else 1.0
+withdrawal_benchmark = sums["brs"] if pledge_property_brs else sums["frs"]
+withdrawal_benchmark_name = "BRS" if pledge_property_brs else "FRS"
 
 with st.expander("Input Summary Used", expanded=False):
     st.write(f"Current age: {age}")
@@ -383,6 +438,9 @@ with st.expander("Input Summary Used", expanded=False):
     st.write(f"Monthly OA used for housing: {money(monthly_oa_housing)}")
     st.write(f"Housing usage ends at age: {housing_end_age}")
     st.write(f"Annual OA used for other purposes: {money(annual_oa_other)}")
+    st.write(f"SA cash top-up per year: {money(sa_cash_topup_per_year)}")
+    st.write(f"OA → SA transfer per year: {money(oa_to_sa_transfer_per_year)}")
+    st.write(f"Use BRS benchmark via property pledge: {'Yes' if pledge_property_brs else 'No'}")
 
 st.header("Key Metrics")
 st.metric("Projected RA", money(ra))
@@ -415,14 +473,30 @@ with st.expander(f"Estimated Retirement Sums for Your Cohort (Turning 55 in {sum
     st.metric("Estimated FRS", money(sums["frs"]))
     st.metric("Estimated ERS", money(sums["ers"]))
 
-with st.expander("Benchmark vs Personal Target", expanded=True):
-    if ra >= sums["frs"]:
+with st.expander("Withdrawal Benchmark Assumption", expanded=True):
+    st.write(
+        f"This run uses **{withdrawal_benchmark_name}** as the simplified withdrawal benchmark for benchmark interpretation."
+    )
+    if pledge_property_brs:
         st.info(
-            "Your projected RA meets the model's estimated FRS benchmark for your cohort. "
+            "Property pledge is switched on, so benchmark interpretation uses BRS instead of FRS. "
+            "This affects the benchmark view only and does not directly change the CPF LIFE payout formula in this simplified model."
+        )
+    else:
+        st.info(
+            "Property pledge is switched off, so benchmark interpretation uses FRS in this simplified model."
+        )
+
+with st.expander("Benchmark vs Personal Target", expanded=True):
+    if ra >= withdrawal_benchmark:
+        st.info(
+            f"Your projected RA meets the model's estimated {withdrawal_benchmark_name} benchmark for your cohort. "
             "This benchmark is different from your personal spending target."
         )
     else:
-        st.warning("Your projected RA is below the model's estimated FRS benchmark for your cohort.")
+        st.warning(
+            f"Your projected RA is below the model's estimated {withdrawal_benchmark_name} benchmark for your cohort."
+        )
 
     if gap > 0:
         st.warning(
@@ -458,6 +532,8 @@ with st.expander("Early Retirement Simulator", expanded=True):
             monthly_oa_housing=monthly_oa_housing,
             housing_end_age=housing_end_age,
             annual_oa_other=annual_oa_other,
+            sa_cash_topup_per_year=sa_cash_topup_per_year,
+            oa_to_sa_transfer_per_year=oa_to_sa_transfer_per_year,
             inflation_rate=inflation,
         )
         payout_test = estimate_cpf_life_payout(scenario["ra"], plan)
@@ -477,22 +553,26 @@ with st.expander("Scenario Comparison Engine", expanded=True):
         scenario_summary(
             "Current plan",
             age, stop_work_age, payout_age, salary, spending, oa_start, sa_start, ma_start,
-            salary_growth, inflation, plan, monthly_oa_housing, housing_end_age, annual_oa_other
+            salary_growth, inflation, plan, monthly_oa_housing, housing_end_age, annual_oa_other,
+            sa_cash_topup_per_year, oa_to_sa_transfer_per_year
         ),
         scenario_summary(
             "Stop work at 60",
             age, 60, payout_age, salary, spending, oa_start, sa_start, ma_start,
-            salary_growth, inflation, plan, monthly_oa_housing, housing_end_age, annual_oa_other
+            salary_growth, inflation, plan, monthly_oa_housing, housing_end_age, annual_oa_other,
+            sa_cash_topup_per_year, oa_to_sa_transfer_per_year
         ),
         scenario_summary(
             "Start payout at 70",
             age, stop_work_age, 70, salary, spending, oa_start, sa_start, ma_start,
-            salary_growth, inflation, plan, monthly_oa_housing, housing_end_age, annual_oa_other
+            salary_growth, inflation, plan, monthly_oa_housing, housing_end_age, annual_oa_other,
+            sa_cash_topup_per_year, oa_to_sa_transfer_per_year
         ),
         scenario_summary(
             "Reduce spending by 20%",
             age, stop_work_age, payout_age, salary, spending * 0.8, oa_start, sa_start, ma_start,
-            salary_growth, inflation, plan, monthly_oa_housing, housing_end_age, annual_oa_other
+            salary_growth, inflation, plan, monthly_oa_housing, housing_end_age, annual_oa_other,
+            sa_cash_topup_per_year, oa_to_sa_transfer_per_year
         ),
     ]
 
@@ -523,7 +603,7 @@ with st.expander("Scenario Comparison Engine", expanded=True):
     else:
         st.info("None of the preset scenarios materially improved the current gap in this simplified model.")
 
-with st.expander("Housing vs Retirement Impact", expanded=True):
+with st.expander("Housing Impact in Current Scenario", expanded=True):
     if monthly_oa_housing == 0:
         st.write("No OA housing deduction is currently applied in this scenario.")
     else:
@@ -539,25 +619,90 @@ with st.expander("Housing vs Retirement Impact", expanded=True):
             monthly_oa_housing=0.0,
             housing_end_age=housing_end_age,
             annual_oa_other=annual_oa_other,
+            sa_cash_topup_per_year=sa_cash_topup_per_year,
+            oa_to_sa_transfer_per_year=oa_to_sa_transfer_per_year,
             inflation_rate=inflation,
         )
         payout_no_housing = estimate_cpf_life_payout(no_housing["ra"], plan)
         impact = payout_no_housing - payout
 
         st.write(
-            f"Using {money(monthly_oa_housing)}/month of OA for housing until age {housing_end_age} may reduce CPF LIFE payout by about {money(impact)}/month."
+            f"Using {money(monthly_oa_housing)}/month of OA for housing until age {housing_end_age} may reduce CPF LIFE payout by about {money(impact)}/month in this simplified model."
         )
 
-        if impact == 0:
-            st.info(
-                "In this scenario, the current housing deduction does not change projected CPF LIFE payout in this simplified model. "
-                "That does not necessarily mean housing has no real-world impact; it means the current deduction still leaves you above the model's simplified threshold."
-            )
+    st.caption(
+        "In this simplified model, different OA and SA paths can still converge to a similar projected RA once the retirement-account cap region is reached. "
+        "So individual impact estimates are directional and may not add up exactly."
+    )
 
-    if monthly_oa_housing == 0 and annual_oa_other > 0 and base["ra"] >= sums["frs"]:
+    if monthly_oa_housing == 0 and annual_oa_other > 0 and base["ra"] >= withdrawal_benchmark:
         st.caption(
-            "Small OA deductions may not materially change CPF LIFE payout when retirement sums are already met in this simplified model."
+            "Small OA deductions may not materially change CPF LIFE payout when retirement-sum benchmarks are already met in this simplified model."
         )
+
+with st.expander("SA Top-Up Impact in Current Scenario", expanded=True):
+    if sa_cash_topup_per_year == 0:
+        st.write("No annual SA cash top-up is currently applied.")
+    else:
+        strategy_off = simulate_plan(
+            current_age=age,
+            stop_work_age=stop_work_age,
+            payout_age=payout_age,
+            salary=salary,
+            salary_growth=salary_growth,
+            oa_start=oa_start,
+            sa_start=sa_start,
+            ma_start=ma_start,
+            monthly_oa_housing=monthly_oa_housing,
+            housing_end_age=housing_end_age,
+            annual_oa_other=annual_oa_other,
+            sa_cash_topup_per_year=0.0,
+            oa_to_sa_transfer_per_year=oa_to_sa_transfer_per_year,
+            inflation_rate=inflation,
+        )
+        payout_without_strategy = estimate_cpf_life_payout(strategy_off["ra"], plan)
+        strategy_gain = payout - payout_without_strategy
+
+        st.write(f"SA cash top-up per year: {money(sa_cash_topup_per_year)}")
+        st.write(f"Estimated CPF LIFE uplift from this annual action: {money(strategy_gain)}/month")
+        st.caption("This uplift is estimated using the simplified assumption that SA cash top-ups are applied only before age 55.")
+
+    st.caption(
+        "In this simplified model, different OA and SA paths can still converge to a similar projected RA once the retirement-account cap region is reached. "
+        "So individual impact estimates are directional and may not add up exactly."
+    )
+
+with st.expander("OA → SA Transfer Impact in Current Scenario", expanded=True):
+    if oa_to_sa_transfer_per_year == 0:
+        st.write("No annual OA → SA transfer is currently applied.")
+    else:
+        transfer_off = simulate_plan(
+            current_age=age,
+            stop_work_age=stop_work_age,
+            payout_age=payout_age,
+            salary=salary,
+            salary_growth=salary_growth,
+            oa_start=oa_start,
+            sa_start=sa_start,
+            ma_start=ma_start,
+            monthly_oa_housing=monthly_oa_housing,
+            housing_end_age=housing_end_age,
+            annual_oa_other=annual_oa_other,
+            sa_cash_topup_per_year=sa_cash_topup_per_year,
+            oa_to_sa_transfer_per_year=0.0,
+            inflation_rate=inflation,
+        )
+        payout_without_transfer = estimate_cpf_life_payout(transfer_off["ra"], plan)
+        transfer_gain = payout - payout_without_transfer
+
+        st.write(f"OA → SA transfer per year: {money(oa_to_sa_transfer_per_year)}")
+        st.write(f"Estimated CPF LIFE uplift from this annual action: {money(transfer_gain)}/month")
+        st.caption("This uplift is estimated using the simplified assumption that OA → SA transfers are applied only before age 55 and are capped by available OA balance.")
+
+    st.caption(
+        "In this simplified model, different OA and SA paths can still converge to a similar projected RA once the retirement-account cap region is reached. "
+        "So individual impact estimates are directional and may not add up exactly."
+    )
 
 st.header("Retirement Gap Over Time")
 retirement_ages = np.arange(payout_age, payout_age + years_retirement, dtype=int)
@@ -571,7 +716,6 @@ gap_df = pd.DataFrame({
 }).set_index("Age")
 
 st.line_chart(gap_df)
-
 st.caption(
     "CPF LIFE is designed for lifelong monthly payouts. This chart shows projected income versus projected spending over time, not CPF LIFE depletion."
 )
