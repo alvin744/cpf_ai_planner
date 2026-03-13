@@ -2,6 +2,11 @@ import streamlit as st
 import pandas as pd
 import numpy as np
 
+try:
+    from openai import OpenAI
+except ImportError:
+    OpenAI = None
+
 st.set_page_config(
     page_title="CPF AI Retirement Planner",
     layout="centered",
@@ -119,6 +124,91 @@ def money(x: float) -> str:
     return f"${x:,.0f}"
 
 
+def scenario_result(
+    age: int,
+    stop_work_age: int,
+    payout_age: int,
+    salary: float,
+    spending: float,
+    oa_start: float,
+    sa_start: float,
+    ma_start: float,
+    salary_growth: float,
+    inflation: float,
+    plan: str,
+    monthly_oa_housing: float,
+    housing_end_age: int,
+    annual_oa_other: float,
+    sa_cash_topup_per_year: float,
+    oa_to_sa_transfer_per_year: float,
+):
+    result = simulate_plan(
+        current_age=age,
+        stop_work_age=stop_work_age,
+        payout_age=payout_age,
+        salary=salary,
+        salary_growth=salary_growth,
+        oa_start=oa_start,
+        sa_start=sa_start,
+        ma_start=ma_start,
+        monthly_oa_housing=monthly_oa_housing,
+        housing_end_age=housing_end_age,
+        annual_oa_other=annual_oa_other,
+        sa_cash_topup_per_year=sa_cash_topup_per_year,
+        oa_to_sa_transfer_per_year=oa_to_sa_transfer_per_year,
+        inflation_rate=inflation,
+    )
+    ra = result["ra"]
+    payout = estimate_cpf_life_payout(ra, plan)
+    future_spending = spending * ((1 + inflation) ** (payout_age - age))
+    gap = future_spending - payout
+    return {
+        "ra": ra,
+        "payout": payout,
+        "future_spending": future_spending,
+        "gap": gap,
+    }
+
+
+def generate_ai_explanation(context: dict, user_question: str = "") -> str:
+    if OpenAI is None:
+        raise RuntimeError("openai package is not installed.")
+
+    api_key = st.secrets.get("OPENAI_API_KEY")
+    if not api_key:
+        raise RuntimeError("OPENAI_API_KEY not found in Streamlit secrets.")
+
+    client = OpenAI(api_key=api_key)
+
+    prompt = f"""
+You are an educational CPF retirement planning assistant.
+
+Use the data below to explain the user's retirement scenario in plain English.
+Do not provide regulated financial advice.
+Do not make guarantees.
+Keep the response practical, concise, and easy to understand.
+
+Include:
+1. A short explanation of the current result
+2. The main reason for the retirement gap
+3. The top 3 actions to consider in this scenario
+4. Any important trade-offs or cautions
+5. A reminder that this is a simplified educational model
+
+User question:
+{user_question if user_question else "No specific question. Explain the scenario."}
+
+Scenario context:
+{context}
+"""
+
+    response = client.responses.create(
+        model="gpt-5-mini",
+        input=prompt,
+    )
+    return response.output_text
+
+
 # -----------------------------------------------------
 # Simulation
 # -----------------------------------------------------
@@ -153,7 +243,6 @@ def simulate_plan(
     for age in range(current_age, payout_age):
         working = age < stop_work_age
 
-        # Apply strategy actions only before 55 in this simplified model
         if age < 55 and sa_cash_topup_per_year > 0:
             sa += sa_cash_topup_per_year
 
@@ -276,6 +365,117 @@ def scenario_summary(
         "Inflated spending": future_spending,
         "Gap": gap,
     }
+
+
+def build_recommendations(
+    age: int,
+    stop_work_age: int,
+    payout_age: int,
+    salary: float,
+    spending: float,
+    oa_start: float,
+    sa_start: float,
+    ma_start: float,
+    salary_growth: float,
+    inflation: float,
+    plan: str,
+    monthly_oa_housing: float,
+    housing_end_age: int,
+    annual_oa_other: float,
+    sa_cash_topup_per_year: float,
+    oa_to_sa_transfer_per_year: float,
+    current_gap: float,
+):
+    recommendations = []
+
+    current = scenario_result(
+        age, stop_work_age, payout_age, salary, spending, oa_start, sa_start, ma_start,
+        salary_growth, inflation, plan, monthly_oa_housing, housing_end_age, annual_oa_other,
+        sa_cash_topup_per_year, oa_to_sa_transfer_per_year
+    )
+
+    reduce_spending = scenario_result(
+        age, stop_work_age, payout_age, salary, spending * 0.8, oa_start, sa_start, ma_start,
+        salary_growth, inflation, plan, monthly_oa_housing, housing_end_age, annual_oa_other,
+        sa_cash_topup_per_year, oa_to_sa_transfer_per_year
+    )
+    recommendations.append({
+        "Action": "Reduce retirement spending target by 20%",
+        "Estimated gap improvement": current["gap"] - reduce_spending["gap"],
+        "Why it helps": "Lower retirement spending directly narrows the monthly income gap.",
+    })
+
+    if payout_age < 70:
+        delay_payout = scenario_result(
+            age, stop_work_age, 70, salary, spending, oa_start, sa_start, ma_start,
+            salary_growth, inflation, plan, monthly_oa_housing, housing_end_age, annual_oa_other,
+            sa_cash_topup_per_year, oa_to_sa_transfer_per_year
+        )
+        recommendations.append({
+            "Action": "Delay CPF LIFE payout start to age 70",
+            "Estimated gap improvement": current["gap"] - delay_payout["gap"],
+            "Why it helps": "A later payout start can raise projected monthly CPF LIFE payouts in this model.",
+        })
+
+    if stop_work_age < 65:
+        work_longer = scenario_result(
+            age, 65, payout_age, salary, spending, oa_start, sa_start, ma_start,
+            salary_growth, inflation, plan, monthly_oa_housing, housing_end_age, annual_oa_other,
+            sa_cash_topup_per_year, oa_to_sa_transfer_per_year
+        )
+        recommendations.append({
+            "Action": "Work until age 65",
+            "Estimated gap improvement": current["gap"] - work_longer["gap"],
+            "Why it helps": "More working years can increase CPF contributions and projected RA.",
+        })
+
+    if monthly_oa_housing > 0:
+        cut_housing = scenario_result(
+            age, stop_work_age, payout_age, salary, spending, oa_start, sa_start, ma_start,
+            salary_growth, inflation, plan, 0.0, housing_end_age, annual_oa_other,
+            sa_cash_topup_per_year, oa_to_sa_transfer_per_year
+        )
+        recommendations.append({
+            "Action": "Reduce or stop OA used for housing",
+            "Estimated gap improvement": current["gap"] - cut_housing["gap"],
+            "Why it helps": "Less OA outflow leaves more balance available for retirement accumulation.",
+        })
+
+    if sa_cash_topup_per_year == 0:
+        add_topup = scenario_result(
+            age, stop_work_age, payout_age, salary, spending, oa_start, sa_start, ma_start,
+            salary_growth, inflation, plan, monthly_oa_housing, housing_end_age, annual_oa_other,
+            8000.0, oa_to_sa_transfer_per_year
+        )
+        recommendations.append({
+            "Action": "Add SA cash top-up of $8,000 per year",
+            "Estimated gap improvement": current["gap"] - add_topup["gap"],
+            "Why it helps": "Pre-55 SA top-ups can improve long-term retirement accumulation in this simplified model.",
+        })
+
+    if oa_to_sa_transfer_per_year == 0 and oa_start > 0:
+        add_transfer = scenario_result(
+            age, stop_work_age, payout_age, salary, spending, oa_start, sa_start, ma_start,
+            salary_growth, inflation, plan, monthly_oa_housing, housing_end_age, annual_oa_other,
+            sa_cash_topup_per_year, 3000.0
+        )
+        recommendations.append({
+            "Action": "Add OA → SA transfer of $3,000 per year",
+            "Estimated gap improvement": current["gap"] - add_transfer["gap"],
+            "Why it helps": "Moving OA to SA may support stronger retirement balances before age 55.",
+        })
+
+    recommendations = [r for r in recommendations if r["Estimated gap improvement"] > 0]
+    recommendations = sorted(recommendations, key=lambda x: x["Estimated gap improvement"], reverse=True)
+
+    if current_gap > 0:
+        recommendations.append({
+            "Action": "Build non-CPF retirement savings",
+            "Estimated gap improvement": 0.0,
+            "Why it helps": "If CPF LIFE still does not fully cover spending, non-CPF savings can help cover the remaining gap.",
+        })
+
+    return recommendations
 
 
 # -----------------------------------------------------
@@ -424,6 +624,26 @@ coverage_ratio = payout / inflated_spending if inflated_spending > 0 else 1.0
 withdrawal_benchmark = sums["brs"] if pledge_property_brs else sums["frs"]
 withdrawal_benchmark_name = "BRS" if pledge_property_brs else "FRS"
 
+recommendations = build_recommendations(
+    age=age,
+    stop_work_age=stop_work_age,
+    payout_age=payout_age,
+    salary=salary,
+    spending=spending,
+    oa_start=oa_start,
+    sa_start=sa_start,
+    ma_start=ma_start,
+    salary_growth=salary_growth,
+    inflation=inflation,
+    plan=plan,
+    monthly_oa_housing=monthly_oa_housing,
+    housing_end_age=housing_end_age,
+    annual_oa_other=annual_oa_other,
+    sa_cash_topup_per_year=sa_cash_topup_per_year,
+    oa_to_sa_transfer_per_year=oa_to_sa_transfer_per_year,
+    current_gap=gap,
+)
+
 with st.expander("Input Summary Used", expanded=False):
     st.write(f"Current age: {age}")
     st.write(f"Stop work age: {stop_work_age}")
@@ -517,6 +737,70 @@ if shortfall_ra > 0:
 else:
     st.success("Your CPF may cover your target retirement spending.")
 
+with st.expander("Recommended Actions", expanded=True):
+    if not recommendations:
+        st.success("No clear improvement actions stood out in this simplified model.")
+    else:
+        for i, rec in enumerate(recommendations[:5], start=1):
+            st.markdown(f"**{i}. {rec['Action']}**")
+            if rec["Estimated gap improvement"] > 0:
+                st.write(f"Estimated gap improvement: {money(rec['Estimated gap improvement'])}/month")
+            st.caption(rec["Why it helps"])
+
+    st.caption(
+        "These suggestions are scenario-based ideas generated from this simplified model. "
+        "They are educational prompts, not personalized financial advice."
+    )
+
+st.header("AI Retirement Coach")
+ai_question = st.text_input(
+    "Ask about this result",
+    placeholder="Why is my gap so high?"
+)
+
+if st.button("Explain My Plan with AI"):
+    try:
+        ai_context = {
+            "inputs": {
+                "age": age,
+                "stop_work_age": stop_work_age,
+                "payout_age": payout_age,
+                "salary": salary,
+                "spending_today": spending,
+                "oa_start": oa_start,
+                "sa_start": sa_start,
+                "ma_start": ma_start,
+                "monthly_oa_housing": monthly_oa_housing,
+                "housing_end_age": housing_end_age,
+                "annual_oa_other": annual_oa_other,
+                "sa_cash_topup_per_year": sa_cash_topup_per_year,
+                "oa_to_sa_transfer_per_year": oa_to_sa_transfer_per_year,
+                "property_pledge_brs": pledge_property_brs,
+            },
+            "outputs": {
+                "projected_ra": ra,
+                "cpf_life_payout": payout,
+                "future_spending": inflated_spending,
+                "gap": gap,
+                "benchmark_used": withdrawal_benchmark_name,
+                "retirement_risk_ratio": coverage_ratio,
+            },
+            "recommendations": recommendations[:5],
+            "model_notes": [
+                "This is a simplified educational model.",
+                "SA cash top-up is applied only before age 55.",
+                "OA to SA transfer is applied only before age 55.",
+                "Property pledge changes benchmark interpretation only, not payout formula.",
+                "Impact estimates are directional and may not add up exactly.",
+            ],
+        }
+
+        ai_text = generate_ai_explanation(ai_context, ai_question)
+        st.write(ai_text)
+
+    except Exception as e:
+        st.error(f"Unable to generate AI explanation: {e}")
+
 with st.expander("Early Retirement Simulator", expanded=True):
     early_results = []
     for test_age in [55, 60, 65]:
@@ -586,9 +870,9 @@ with st.expander("Scenario Comparison Engine", expanded=True):
     st.dataframe(display_df, use_container_width=True, hide_index=True)
 
     improvements = []
-    current_gap = scenarios[0]["Gap"]
+    current_gap_value = scenarios[0]["Gap"]
     for row in scenarios[1:]:
-        gap_reduction = current_gap - row["Gap"]
+        gap_reduction = current_gap_value - row["Gap"]
         improvements.append({
             "Scenario": row["Scenario"],
             "Gap reduction": gap_reduction,

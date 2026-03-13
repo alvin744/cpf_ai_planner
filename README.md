@@ -1,46 +1,53 @@
 # CPF AI Retirement Planner
 
-A simplified CPF retirement projection and strategy simulator built with Streamlit.
+A public-facing educational retirement planning web app built with Streamlit.
 
-This tool helps users estimate how their CPF balances may grow over time, compare projected CPF LIFE payouts against future spending needs, and understand the gap between benchmark retirement sums and personal retirement goals.
+This tool helps users explore CPF retirement scenarios, estimate CPF LIFE payouts, compare strategies, and understand possible ways to improve retirement adequacy using a simplified planning model.
 
-## What this app does
+## Features
 
-- Projects CPF balances across:
-  - Ordinary Account (OA)
-  - Special Account (SA)
-  - MediSave Account (MA)
-  - Retirement Account (RA)
-- Estimates cohort-based:
-  - Basic Retirement Sum (BRS)
-  - Full Retirement Sum (FRS)
-  - Enhanced Retirement Sum (ERS)
-- Estimates CPF LIFE monthly payout under:
-  - Standard
-  - Basic
-  - Escalating
-- Compares projected payout against inflation-adjusted retirement spending
-- Shows retirement target shortfall in RA terms
-- Simulates early retirement scenarios
-- Shows housing deduction impact in a simplified way
-- Visualizes CPF growth and longevity risk
+- CPF LIFE payout projection
+- Retirement gap analysis
+- Benchmark comparison against estimated BRS / FRS / ERS
+- Early retirement scenario comparison
+- Housing impact simulation
+- SA cash top-up simulation
+- OA to SA transfer simulation
+- Property pledge benchmark interpretation
+- Recommendation engine for possible improvement actions
+- AI Retirement Coach using OpenAI for plain-English explanations
 
-## Important disclaimer
+## How it works
 
-This tool is for **educational planning support only**.
+The app uses a rule-based CPF simulation engine to project retirement outcomes based on user inputs such as:
 
-It is **not the official CPF estimator** and does **not** replace financial advice.  
-Actual CPF balances, allocation rules, retirement sums, and CPF LIFE payouts depend on CPF Board policies and official calculations.
+- current age
+- stop work age
+- payout start age
+- salary
+- retirement spending target
+- OA / SA / MA balances
+- housing usage
+- SA cash top-ups
+- OA to SA transfers
 
-## Current model limitations
+The AI layer does not perform the core retirement calculations.  
+Instead, it uses OpenAI to explain the results in plain English, answer user questions, and highlight possible next steps.
 
-This app uses simplified assumptions for public planning use. For example:
+## Important note
 
-- contribution allocation is simplified
-- post-55 contribution handling is simplified
-- CPF LIFE payout is estimated using a simplified payout factor
-- housing and other OA usage are modeled in a simplified manner
-- results should be treated as directional planning output, not exact CPF forecasts
+This planner is for **educational planning support only**.
+
+It does **not** replace:
+- the official CPF estimator
+- professional financial advice
+- actual CPF Board calculations and policies
+
+Some features use simplified assumptions, including:
+- SA cash top-up applied only before age 55
+- OA to SA transfer applied only before age 55
+- property pledge affects benchmark interpretation only in this version
+- impact estimates are directional and may not add up exactly
 
 ## Tech stack
 
@@ -48,14 +55,11 @@ This app uses simplified assumptions for public planning use. For example:
 - Streamlit
 - Pandas
 - NumPy
+- OpenAI API
 
-## Project structure
+## Run locally
 
-Example structure:
+Install dependencies:
 
-```text
-.
-├── app.py
-├── requirements.txt
-├── README.md
-└── ...
+```bash
+pip install -r requirements.txt
