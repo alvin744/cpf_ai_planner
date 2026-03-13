@@ -41,6 +41,9 @@ WIDGET_KEY_MAP = {
     "sa_cash_topup_per_year": "sa_cash_topup_per_year_input",
     "oa_to_sa_transfer_per_year": "oa_to_sa_transfer_per_year_input",
     "pledge_property_brs": "pledge_property_brs_input",
+    "other_monthly_income": "other_monthly_income_input",
+    "other_income_inflates": "other_income_inflates_input",
+    "starting_non_cpf_assets": "starting_non_cpf_assets_input",
 }
 
 DEFAULT_INPUTS = {
@@ -62,6 +65,9 @@ DEFAULT_INPUTS = {
     "sa_cash_topup_per_year": 0.0,
     "oa_to_sa_transfer_per_year": 0.0,
     "pledge_property_brs": False,
+    "other_monthly_income": 0.0,
+    "other_income_inflates": False,
+    "starting_non_cpf_assets": 0.0,
 }
 
 # -----------------------------------------------------
@@ -122,52 +128,6 @@ def get_allocation(age: int) -> dict:
 
 def money(x: float) -> str:
     return f"${x:,.0f}"
-
-
-def scenario_result(
-    age: int,
-    stop_work_age: int,
-    payout_age: int,
-    salary: float,
-    spending: float,
-    oa_start: float,
-    sa_start: float,
-    ma_start: float,
-    salary_growth: float,
-    inflation: float,
-    plan: str,
-    monthly_oa_housing: float,
-    housing_end_age: int,
-    annual_oa_other: float,
-    sa_cash_topup_per_year: float,
-    oa_to_sa_transfer_per_year: float,
-):
-    result = simulate_plan(
-        current_age=age,
-        stop_work_age=stop_work_age,
-        payout_age=payout_age,
-        salary=salary,
-        salary_growth=salary_growth,
-        oa_start=oa_start,
-        sa_start=sa_start,
-        ma_start=ma_start,
-        monthly_oa_housing=monthly_oa_housing,
-        housing_end_age=housing_end_age,
-        annual_oa_other=annual_oa_other,
-        sa_cash_topup_per_year=sa_cash_topup_per_year,
-        oa_to_sa_transfer_per_year=oa_to_sa_transfer_per_year,
-        inflation_rate=inflation,
-    )
-    ra = result["ra"]
-    payout = estimate_cpf_life_payout(ra, plan)
-    future_spending = spending * ((1 + inflation) ** (payout_age - age))
-    gap = future_spending - payout
-    return {
-        "ra": ra,
-        "payout": payout,
-        "future_spending": future_spending,
-        "gap": gap,
-    }
 
 
 def generate_ai_explanation(context: dict, user_question: str = "") -> str:
@@ -318,8 +278,7 @@ def simulate_plan(
     }
 
 
-def scenario_summary(
-    label: str,
+def scenario_result(
     age: int,
     stop_work_age: int,
     payout_age: int,
@@ -336,6 +295,7 @@ def scenario_summary(
     annual_oa_other: float,
     sa_cash_topup_per_year: float,
     oa_to_sa_transfer_per_year: float,
+    other_monthly_income: float = 0.0,
 ):
     result = simulate_plan(
         current_age=age,
@@ -356,12 +316,64 @@ def scenario_summary(
     ra = result["ra"]
     payout = estimate_cpf_life_payout(ra, plan)
     future_spending = spending * ((1 + inflation) ** (payout_age - age))
-    gap = future_spending - payout
+    total_income = payout + other_monthly_income
+    gap = max(future_spending - total_income, 0.0)
+    return {
+        "ra": ra,
+        "payout": payout,
+        "total_income": total_income,
+        "future_spending": future_spending,
+        "gap": gap,
+    }
+
+
+def scenario_summary(
+    label: str,
+    age: int,
+    stop_work_age: int,
+    payout_age: int,
+    salary: float,
+    spending: float,
+    oa_start: float,
+    sa_start: float,
+    ma_start: float,
+    salary_growth: float,
+    inflation: float,
+    plan: str,
+    monthly_oa_housing: float,
+    housing_end_age: int,
+    annual_oa_other: float,
+    sa_cash_topup_per_year: float,
+    oa_to_sa_transfer_per_year: float,
+    other_monthly_income: float,
+):
+    result = simulate_plan(
+        current_age=age,
+        stop_work_age=stop_work_age,
+        payout_age=payout_age,
+        salary=salary,
+        salary_growth=salary_growth,
+        oa_start=oa_start,
+        sa_start=sa_start,
+        ma_start=ma_start,
+        monthly_oa_housing=monthly_oa_housing,
+        housing_end_age=housing_end_age,
+        annual_oa_other=annual_oa_other,
+        sa_cash_topup_per_year=sa_cash_topup_per_year,
+        oa_to_sa_transfer_per_year=oa_to_sa_transfer_per_year,
+        inflation_rate=inflation,
+    )
+    ra = result["ra"]
+    payout = estimate_cpf_life_payout(ra, plan)
+    future_spending = spending * ((1 + inflation) ** (payout_age - age))
+    total_income = payout + other_monthly_income
+    gap = max(future_spending - total_income, 0.0)
 
     return {
         "Scenario": label,
         "RA at payout": ra,
         "CPF LIFE payout": payout,
+        "Total retirement income": total_income,
         "Inflated spending": future_spending,
         "Gap": gap,
     }
@@ -385,19 +397,49 @@ def build_recommendations(
     sa_cash_topup_per_year: float,
     oa_to_sa_transfer_per_year: float,
     current_gap: float,
+    other_monthly_income: float,
 ):
     recommendations = []
+
+    if current_gap <= 0:
+        recommendations.append({
+            "Action": "Your current modeled retirement income covers your target spending",
+            "Estimated gap improvement": 0.0,
+            "Why it helps": "This scenario is already fully funded in the simplified model at payout age.",
+        })
+
+        if payout_age < 70:
+            recommendations.append({
+                "Action": "Stress-test the plan by comparing payout age 65 vs 70",
+                "Estimated gap improvement": 0.0,
+                "Why it helps": "A later payout start may improve resilience, but it also requires funding the years before CPF LIFE begins.",
+            })
+
+        if monthly_oa_housing > 0:
+            recommendations.append({
+                "Action": "Stress-test the plan against continued housing usage",
+                "Estimated gap improvement": 0.0,
+                "Why it helps": "Housing outflows can still reduce retirement flexibility even if the base scenario is currently fully funded.",
+            })
+
+        recommendations.append({
+            "Action": "Build a buffer for inflation, health costs, or changes in other income",
+            "Estimated gap improvement": 0.0,
+            "Why it helps": "Even when the model shows full coverage, real-life spending and income may change over time.",
+        })
+
+        return recommendations
 
     current = scenario_result(
         age, stop_work_age, payout_age, salary, spending, oa_start, sa_start, ma_start,
         salary_growth, inflation, plan, monthly_oa_housing, housing_end_age, annual_oa_other,
-        sa_cash_topup_per_year, oa_to_sa_transfer_per_year
+        sa_cash_topup_per_year, oa_to_sa_transfer_per_year, other_monthly_income
     )
 
     reduce_spending = scenario_result(
         age, stop_work_age, payout_age, salary, spending * 0.8, oa_start, sa_start, ma_start,
         salary_growth, inflation, plan, monthly_oa_housing, housing_end_age, annual_oa_other,
-        sa_cash_topup_per_year, oa_to_sa_transfer_per_year
+        sa_cash_topup_per_year, oa_to_sa_transfer_per_year, other_monthly_income
     )
     recommendations.append({
         "Action": "Reduce retirement spending target by 20%",
@@ -409,7 +451,7 @@ def build_recommendations(
         delay_payout = scenario_result(
             age, stop_work_age, 70, salary, spending, oa_start, sa_start, ma_start,
             salary_growth, inflation, plan, monthly_oa_housing, housing_end_age, annual_oa_other,
-            sa_cash_topup_per_year, oa_to_sa_transfer_per_year
+            sa_cash_topup_per_year, oa_to_sa_transfer_per_year, other_monthly_income
         )
         recommendations.append({
             "Action": "Delay CPF LIFE payout start to age 70",
@@ -421,7 +463,7 @@ def build_recommendations(
         work_longer = scenario_result(
             age, 65, payout_age, salary, spending, oa_start, sa_start, ma_start,
             salary_growth, inflation, plan, monthly_oa_housing, housing_end_age, annual_oa_other,
-            sa_cash_topup_per_year, oa_to_sa_transfer_per_year
+            sa_cash_topup_per_year, oa_to_sa_transfer_per_year, other_monthly_income
         )
         recommendations.append({
             "Action": "Work until age 65",
@@ -433,7 +475,7 @@ def build_recommendations(
         cut_housing = scenario_result(
             age, stop_work_age, payout_age, salary, spending, oa_start, sa_start, ma_start,
             salary_growth, inflation, plan, 0.0, housing_end_age, annual_oa_other,
-            sa_cash_topup_per_year, oa_to_sa_transfer_per_year
+            sa_cash_topup_per_year, oa_to_sa_transfer_per_year, other_monthly_income
         )
         recommendations.append({
             "Action": "Reduce or stop OA used for housing",
@@ -445,7 +487,7 @@ def build_recommendations(
         add_topup = scenario_result(
             age, stop_work_age, payout_age, salary, spending, oa_start, sa_start, ma_start,
             salary_growth, inflation, plan, monthly_oa_housing, housing_end_age, annual_oa_other,
-            8000.0, oa_to_sa_transfer_per_year
+            8000.0, oa_to_sa_transfer_per_year, other_monthly_income
         )
         recommendations.append({
             "Action": "Add SA cash top-up of $8,000 per year",
@@ -457,7 +499,7 @@ def build_recommendations(
         add_transfer = scenario_result(
             age, stop_work_age, payout_age, salary, spending, oa_start, sa_start, ma_start,
             salary_growth, inflation, plan, monthly_oa_housing, housing_end_age, annual_oa_other,
-            sa_cash_topup_per_year, 3000.0
+            sa_cash_topup_per_year, 3000.0, other_monthly_income
         )
         recommendations.append({
             "Action": "Add OA → SA transfer of $3,000 per year",
@@ -468,14 +510,77 @@ def build_recommendations(
     recommendations = [r for r in recommendations if r["Estimated gap improvement"] > 0]
     recommendations = sorted(recommendations, key=lambda x: x["Estimated gap improvement"], reverse=True)
 
-    if current_gap > 0:
-        recommendations.append({
-            "Action": "Build non-CPF retirement savings",
-            "Estimated gap improvement": 0.0,
-            "Why it helps": "If CPF LIFE still does not fully cover spending, non-CPF savings can help cover the remaining gap.",
-        })
+    recommendations.append({
+        "Action": "Build non-CPF retirement savings",
+        "Estimated gap improvement": 0.0,
+        "Why it helps": "If CPF LIFE and other retirement income still do not fully cover spending, non-CPF savings can help cover the remaining gap.",
+    })
 
     return recommendations
+
+
+def build_retirement_funding_projection(
+    payout_age: int,
+    years_retirement: int,
+    cpf_life_monthly: float,
+    spending_at_payout_age: float,
+    inflation: float,
+    other_monthly_income: float,
+    other_income_inflates: bool,
+    starting_non_cpf_assets: float,
+):
+    ages = []
+    cpf_income_list = []
+    other_income_list = []
+    total_income_list = []
+    spending_list = []
+    gap_list = []
+    assets_list = []
+
+    assets = float(starting_non_cpf_assets)
+    depletion_age = None
+
+    for i in range(years_retirement):
+        age = payout_age + i
+        spending_now = spending_at_payout_age * ((1 + inflation) ** i)
+
+        if other_income_inflates:
+            other_income_now = other_monthly_income * ((1 + inflation) ** i)
+        else:
+            other_income_now = other_monthly_income
+
+        total_income_now = cpf_life_monthly + other_income_now
+        monthly_gap = max(spending_now - total_income_now, 0.0)
+        annual_gap = monthly_gap * 12
+
+        if assets > 0:
+            assets = max(0.0, assets - annual_gap)
+            if assets == 0.0 and depletion_age is None and annual_gap > 0:
+                depletion_age = age
+        else:
+            assets = 0.0
+            if depletion_age is None and annual_gap > 0:
+                depletion_age = age
+
+        ages.append(age)
+        cpf_income_list.append(cpf_life_monthly)
+        other_income_list.append(other_income_now)
+        total_income_list.append(total_income_now)
+        spending_list.append(spending_now)
+        gap_list.append(monthly_gap)
+        assets_list.append(assets)
+
+    df = pd.DataFrame({
+        "Age": ages,
+        "CPF LIFE Income": cpf_income_list,
+        "Other Income": other_income_list,
+        "Total Income": total_income_list,
+        "Spending": spending_list,
+        "Monthly Gap": gap_list,
+        "Non-CPF Assets": assets_list,
+    }).set_index("Age")
+
+    return df, depletion_age
 
 
 # -----------------------------------------------------
@@ -554,6 +659,27 @@ st.sidebar.caption(
     "It does not directly change the CPF LIFE payout formula."
 )
 
+st.sidebar.markdown("### Other Retirement Income")
+st.sidebar.number_input(
+    "Other monthly retirement income",
+    min_value=0.0,
+    max_value=100000.0,
+    step=100.0,
+    key="other_monthly_income_input",
+)
+st.sidebar.checkbox(
+    "Other income grows with inflation",
+    key="other_income_inflates_input",
+)
+st.sidebar.number_input(
+    "Starting non-CPF retirement assets",
+    min_value=0.0,
+    max_value=20000000.0,
+    step=1000.0,
+    key="starting_non_cpf_assets_input",
+)
+st.sidebar.caption("Examples: cash, investments, annuity capital, rental-sale proceeds, or other non-CPF assets used to cover retirement shortfalls.")
+
 run_clicked = st.sidebar.button("Run Planner", type="primary")
 
 if run_clicked:
@@ -597,6 +723,9 @@ annual_oa_other = float(inputs["annual_oa_other"])
 sa_cash_topup_per_year = float(inputs["sa_cash_topup_per_year"])
 oa_to_sa_transfer_per_year = float(inputs["oa_to_sa_transfer_per_year"])
 pledge_property_brs = bool(inputs["pledge_property_brs"])
+other_monthly_income = float(inputs["other_monthly_income"])
+other_income_inflates = bool(inputs["other_income_inflates"])
+starting_non_cpf_assets = float(inputs["starting_non_cpf_assets"])
 
 base = simulate_plan(
     current_age=age,
@@ -618,9 +747,11 @@ base = simulate_plan(
 ra = base["ra"]
 payout = estimate_cpf_life_payout(ra, plan)
 inflated_spending = spending * ((1 + inflation) ** (payout_age - age))
-gap = inflated_spending - payout
+total_retirement_income = payout + other_monthly_income
+gap = max(inflated_spending - total_retirement_income, 0.0)
+
 sums = base["sums"]
-coverage_ratio = payout / inflated_spending if inflated_spending > 0 else 1.0
+coverage_ratio = total_retirement_income / inflated_spending if inflated_spending > 0 else 1.0
 withdrawal_benchmark = sums["brs"] if pledge_property_brs else sums["frs"]
 withdrawal_benchmark_name = "BRS" if pledge_property_brs else "FRS"
 
@@ -642,6 +773,18 @@ recommendations = build_recommendations(
     sa_cash_topup_per_year=sa_cash_topup_per_year,
     oa_to_sa_transfer_per_year=oa_to_sa_transfer_per_year,
     current_gap=gap,
+    other_monthly_income=other_monthly_income,
+)
+
+funding_df, depletion_age = build_retirement_funding_projection(
+    payout_age=payout_age,
+    years_retirement=years_retirement,
+    cpf_life_monthly=payout,
+    spending_at_payout_age=inflated_spending,
+    inflation=inflation,
+    other_monthly_income=other_monthly_income,
+    other_income_inflates=other_income_inflates,
+    starting_non_cpf_assets=starting_non_cpf_assets,
 )
 
 with st.expander("Input Summary Used", expanded=False):
@@ -661,37 +804,50 @@ with st.expander("Input Summary Used", expanded=False):
     st.write(f"SA cash top-up per year: {money(sa_cash_topup_per_year)}")
     st.write(f"OA → SA transfer per year: {money(oa_to_sa_transfer_per_year)}")
     st.write(f"Use BRS benchmark via property pledge: {'Yes' if pledge_property_brs else 'No'}")
+    st.write(f"Other monthly retirement income: {money(other_monthly_income)}")
+    st.write(f"Other income grows with inflation: {'Yes' if other_income_inflates else 'No'}")
+    st.write(f"Starting non-CPF retirement assets: {money(starting_non_cpf_assets)}")
 
 st.header("Key Metrics")
-st.metric("Projected RA", money(ra))
-st.metric("CPF LIFE", f"{money(payout)}/month")
-st.metric("Future spending", f"{money(inflated_spending)}/month")
-st.metric("Gap", money(gap))
+row1_col1, row1_col2, row1_col3 = st.columns(3)
+row1_col1.metric("Projected RA", money(ra))
+row1_col2.metric("CPF LIFE", f"{money(payout)}/month")
+row1_col3.metric("Other income", f"{money(other_monthly_income)}/month")
+
+row2_col1, row2_col2 = st.columns(2)
+row2_col1.metric("Future spending", f"{money(inflated_spending)}/month")
+row2_col2.metric("Gap after all retirement income", money(gap))
 
 st.header("Retirement Risk")
 if coverage_ratio >= 1.0:
     st.success(
-        "🟢 Low retirement risk: your projected CPF LIFE payout is close to or above your spending target at payout age."
+        "🟢 Low retirement risk: your projected retirement income is close to or above your spending target at payout age."
     )
 elif coverage_ratio >= 0.8:
     st.warning(
-        "🟡 Moderate retirement risk: your projected CPF LIFE payout may cover much of your spending target, but a gap remains."
+        "🟡 Moderate retirement risk: your projected retirement income may cover much of your spending target, but a gap remains."
     )
 else:
     st.error(
-        "🔴 High retirement risk: your projected CPF LIFE payout is significantly below your spending target, so additional planning may be needed."
+        "🔴 High retirement risk: your projected retirement income is significantly below your spending target, so additional planning may be needed."
     )
 
 with st.expander("Today vs Payout-Age Dollars", expanded=True):
-    st.metric("Today's spending target", f"{money(spending)}/month")
-    st.metric(f"Equivalent spending at age {payout_age}", f"{money(inflated_spending)}/month")
-    st.metric(f"Projected CPF LIFE at age {payout_age}", f"{money(payout)}/month")
+    row1_col1, row1_col2 = st.columns(2)
+    row1_col1.metric("Today's spending target", f"{money(spending)}/month")
+    row1_col2.metric(f"Equivalent spending at age {payout_age}", f"{money(inflated_spending)}/month")
+
+    row2_col1, row2_col2 = st.columns(2)
+    row2_col1.metric(f"Projected CPF LIFE at age {payout_age}", f"{money(payout)}/month")
+    row2_col2.metric(f"Other income at age {payout_age}", f"{money(other_monthly_income)}/month")
+
     st.metric(f"Gap at age {payout_age}", f"{money(gap)}/month")
 
 with st.expander(f"Estimated Retirement Sums for Your Cohort (Turning 55 in {sums['cohort_year']})", expanded=True):
-    st.metric("Estimated BRS", money(sums["brs"]))
-    st.metric("Estimated FRS", money(sums["frs"]))
-    st.metric("Estimated ERS", money(sums["ers"]))
+    a, b, c = st.columns(3)
+    a.metric("Estimated BRS", money(sums["brs"]))
+    b.metric("Estimated FRS", money(sums["frs"]))
+    c.metric("Estimated ERS", money(sums["ers"]))
 
 with st.expander("Withdrawal Benchmark Assumption", expanded=True):
     st.write(
@@ -720,22 +876,22 @@ with st.expander("Benchmark vs Personal Target", expanded=True):
 
     if gap > 0:
         st.warning(
-            "Even if the simplified benchmark is met, your projected CPF LIFE payout may still fall short of your personal spending target."
+            "Even if the simplified benchmark is met, your projected combined retirement income may still fall short of your personal spending target."
         )
     else:
-        st.success("Your projected CPF LIFE payout may cover your current personal spending target in this model.")
+        st.success("Your projected retirement income may cover your current personal spending target in this model.")
 
 st.header("Retirement Target Solver")
-required_ra = inflated_spending / 0.0079
+required_ra = max(inflated_spending - other_monthly_income, 0.0) / 0.0079 if inflated_spending > other_monthly_income else 0.0
 shortfall_ra = required_ra - ra
 
-st.write(f"Required RA to support spending: {money(required_ra)}")
+st.write(f"Required RA after accounting for other income: {money(required_ra)}")
 st.write(f"Your projected RA: {money(ra)}")
 
 if shortfall_ra > 0:
     st.warning(f"Additional RA needed: {money(shortfall_ra)}")
 else:
-    st.success("Your CPF may cover your target retirement spending.")
+    st.success("Your CPF plus other retirement income may cover your target retirement spending.")
 
 with st.expander("Recommended Actions", expanded=True):
     if not recommendations:
@@ -753,9 +909,10 @@ with st.expander("Recommended Actions", expanded=True):
     )
 
 st.header("AI Retirement Coach")
+ai_placeholder = "Why is my gap so high?" if gap > 0 else "Is my plan strong enough?"
 ai_question = st.text_input(
     "Ask about this result",
-    placeholder="Why is my gap so high?"
+    placeholder=ai_placeholder
 )
 
 if st.button("Explain My Plan with AI"):
@@ -776,14 +933,19 @@ if st.button("Explain My Plan with AI"):
                 "sa_cash_topup_per_year": sa_cash_topup_per_year,
                 "oa_to_sa_transfer_per_year": oa_to_sa_transfer_per_year,
                 "property_pledge_brs": pledge_property_brs,
+                "other_monthly_income": other_monthly_income,
+                "other_income_inflates": other_income_inflates,
+                "starting_non_cpf_assets": starting_non_cpf_assets,
             },
             "outputs": {
                 "projected_ra": ra,
                 "cpf_life_payout": payout,
+                "other_income": other_monthly_income,
                 "future_spending": inflated_spending,
                 "gap": gap,
                 "benchmark_used": withdrawal_benchmark_name,
                 "retirement_risk_ratio": coverage_ratio,
+                "non_cpf_assets_depletion_age": depletion_age,
             },
             "recommendations": recommendations[:5],
             "model_notes": [
@@ -792,6 +954,7 @@ if st.button("Explain My Plan with AI"):
                 "OA to SA transfer is applied only before age 55.",
                 "Property pledge changes benchmark interpretation only, not payout formula.",
                 "Impact estimates are directional and may not add up exactly.",
+                "CPF LIFE is lifelong; depletion analysis applies to non-CPF assets, not CPF LIFE.",
             ],
         }
 
@@ -820,17 +983,25 @@ with st.expander("Early Retirement Simulator", expanded=True):
             oa_to_sa_transfer_per_year=oa_to_sa_transfer_per_year,
             inflation_rate=inflation,
         )
-        payout_test = estimate_cpf_life_payout(scenario["ra"], plan)
+        payout_test = estimate_cpf_life_payout(scenario["ra"], plan) + other_monthly_income
         early_results.append((test_age, payout_test))
         st.metric(f"Stop Work {test_age}", f"{money(payout_test)}/month")
 
     unique_payouts = {round(p, 2) for _, p in early_results}
     if len(unique_payouts) == 1:
-        st.info(
-            "In this scenario, you are projected to meet the model's simplified retirement-sum threshold by age 55. "
-            "Because post-55 RA contributions are capped in this simplified version, stopping work at 55, 60, or 65 "
-            "produces the same projected CPF LIFE payout. This does not mean the payout is enough to meet your personal spending target."
-        )
+        if gap > 0:
+            st.info(
+                "In this scenario, you are projected to meet the model's simplified retirement-sum threshold by age 55. "
+                "Because post-55 RA contributions are capped in this simplified version, stopping work at 55, 60, or 65 "
+                "produces the same projected CPF LIFE payout. This does not mean total retirement income is enough to meet your personal spending target."
+            )
+        else:
+            st.info(
+                "In this scenario, you are projected to meet the model's simplified retirement-sum threshold by age 55. "
+                "Because post-55 RA contributions are capped in this simplified version, stopping work at 55, 60, or 65 "
+                "produces the same projected CPF LIFE payout. In the current scenario, total modeled retirement income meets your target spending at payout age, "
+                "but real-world risks such as inflation, income variability, and unexpected expenses may still matter."
+            )
 
 with st.expander("Scenario Comparison Engine", expanded=True):
     scenarios = [
@@ -838,25 +1009,25 @@ with st.expander("Scenario Comparison Engine", expanded=True):
             "Current plan",
             age, stop_work_age, payout_age, salary, spending, oa_start, sa_start, ma_start,
             salary_growth, inflation, plan, monthly_oa_housing, housing_end_age, annual_oa_other,
-            sa_cash_topup_per_year, oa_to_sa_transfer_per_year
+            sa_cash_topup_per_year, oa_to_sa_transfer_per_year, other_monthly_income
         ),
         scenario_summary(
             "Stop work at 60",
             age, 60, payout_age, salary, spending, oa_start, sa_start, ma_start,
             salary_growth, inflation, plan, monthly_oa_housing, housing_end_age, annual_oa_other,
-            sa_cash_topup_per_year, oa_to_sa_transfer_per_year
+            sa_cash_topup_per_year, oa_to_sa_transfer_per_year, other_monthly_income
         ),
         scenario_summary(
             "Start payout at 70",
             age, stop_work_age, 70, salary, spending, oa_start, sa_start, ma_start,
             salary_growth, inflation, plan, monthly_oa_housing, housing_end_age, annual_oa_other,
-            sa_cash_topup_per_year, oa_to_sa_transfer_per_year
+            sa_cash_topup_per_year, oa_to_sa_transfer_per_year, other_monthly_income
         ),
         scenario_summary(
             "Reduce spending by 20%",
             age, stop_work_age, payout_age, salary, spending * 0.8, oa_start, sa_start, ma_start,
             salary_growth, inflation, plan, monthly_oa_housing, housing_end_age, annual_oa_other,
-            sa_cash_topup_per_year, oa_to_sa_transfer_per_year
+            sa_cash_topup_per_year, oa_to_sa_transfer_per_year, other_monthly_income
         ),
     ]
 
@@ -864,6 +1035,7 @@ with st.expander("Scenario Comparison Engine", expanded=True):
     display_df = scenario_df.copy()
     display_df["RA at payout"] = display_df["RA at payout"].map(money)
     display_df["CPF LIFE payout"] = display_df["CPF LIFE payout"].map(lambda x: f"{money(x)}/month")
+    display_df["Total retirement income"] = display_df["Total retirement income"].map(lambda x: f"{money(x)}/month")
     display_df["Inflated spending"] = display_df["Inflated spending"].map(lambda x: f"{money(x)}/month")
     display_df["Gap"] = display_df["Gap"].map(money)
 
@@ -885,7 +1057,10 @@ with st.expander("Scenario Comparison Engine", expanded=True):
             f"It improves the monthly gap by about **{money(best['Gap reduction'])}** in this simplified model."
         )
     else:
-        st.info("None of the preset scenarios materially improved the current gap in this simplified model.")
+        if gap <= 0:
+            st.success("Your current scenario already closes the modeled retirement gap at payout age.")
+        else:
+            st.info("None of the preset scenarios materially improved the current gap in this simplified model.")
 
 with st.expander("Housing Impact in Current Scenario", expanded=True):
     if monthly_oa_housing == 0:
@@ -988,20 +1163,31 @@ with st.expander("OA → SA Transfer Impact in Current Scenario", expanded=True)
         "So individual impact estimates are directional and may not add up exactly."
     )
 
-st.header("Retirement Gap Over Time")
-retirement_ages = np.arange(payout_age, payout_age + years_retirement, dtype=int)
-monthly_income = np.repeat(float(payout), len(retirement_ages))
-monthly_spending = inflated_spending * (1.02 ** (retirement_ages - payout_age))
+st.header("Retirement Funding & Depletion")
+income_chart_df = funding_df[["CPF LIFE Income", "Other Income", "Spending"]].round(2)
+st.line_chart(income_chart_df)
 
-gap_df = pd.DataFrame({
-    "Age": retirement_ages,
-    "Income": monthly_income,
-    "Spending": monthly_spending,
-}).set_index("Age")
+assets_chart_df = funding_df[["Non-CPF Assets"]].round(2)
+st.line_chart(assets_chart_df)
 
-st.line_chart(gap_df)
+if starting_non_cpf_assets > 0:
+    if depletion_age is not None:
+        st.warning(f"Based on the current scenario, your non-CPF retirement assets may be depleted around age {depletion_age}.")
+    else:
+        st.success("Based on the current scenario, your non-CPF retirement assets may last through the modeled retirement period.")
+else:
+    st.info("No non-CPF retirement assets were entered for depletion analysis.")
+
 st.caption(
-    "CPF LIFE is designed for lifelong monthly payouts. This chart shows projected income versus projected spending over time, not CPF LIFE depletion."
+    "CPF LIFE is designed for lifelong monthly payouts. The depletion analysis here applies only to non-CPF retirement assets used to cover any remaining gap."
+)
+
+st.header("Retirement Gap Over Time")
+gap_df = funding_df[["Total Income", "Spending"]].rename(columns={"Total Income": "Income"}).round(2)
+st.line_chart(gap_df)
+
+st.caption(
+    "This chart compares projected total retirement income against projected spending over time."
 )
 
 st.header("CPF Growth Projection")
@@ -1011,20 +1197,11 @@ if not history.empty:
     for col in ["OA", "SA", "MA", "RA"]:
         growth_df[col] = growth_df[col].clip(lower=0).round(2)
     growth_df["Age"] = growth_df["Age"].astype(int)
-    growth_df = growth_df.set_index("Age")
+    growth_df = growth_df.set_index("Age").round(2)
     st.line_chart(growth_df)
 
 st.header("Longevity Risk")
-longevity_ages = np.arange(payout_age, payout_age + years_retirement, dtype=int)
-income = np.repeat(float(payout), len(longevity_ages))
-spending_curve = inflated_spending * (1.02 ** (longevity_ages - payout_age))
-
-longevity_df = pd.DataFrame({
-    "Age": longevity_ages,
-    "Income": income,
-    "Spending": spending_curve,
-}).set_index("Age")
-
+longevity_df = funding_df[["Total Income", "Spending"]].rename(columns={"Total Income": "Income"}).round(2)
 st.line_chart(longevity_df)
 
 st.divider()
